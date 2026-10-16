@@ -4,11 +4,11 @@ import TxnList from '../components/TxnList'
 import { Card, Empty, SectionTitle } from '../components/ui'
 import { getRange, todayISO } from '../lib/dates'
 import { money } from '../lib/format'
-import { inRange, monthForecast, sortTxns, summarize } from '../lib/stats'
+import { inRange, monthForecast, realTxns, sortTxns, summarize } from '../lib/stats'
 import { useStore } from '../lib/store'
 
 export default function Home({ onEdit, onAdd, onTab }) {
-  const { transactions, currency, lastTxn, deleteTxn, restoreTxn, showToast } = useStore()
+  const { transactions, currency, lastTxn, deleteTxn, restoreTxn, showToast, balances } = useStore()
   const month = getRange('month', 0)
   const today = todayISO()
 
@@ -16,7 +16,7 @@ export default function Home({ onEdit, onAdd, onTab }) {
     const monthTxns = transactions.filter((t) => inRange(t, month))
     return {
       sum: summarize(monthTxns, month),
-      todaySpent: transactions.filter((t) => t.date === today && t.type !== 'income').reduce((s, t) => s + t.amount, 0),
+      todaySpent: realTxns(transactions).filter((t) => t.date === today && t.type !== 'income').reduce((s, t) => s + t.amount, 0),
       recent: sortTxns(transactions).slice(0, 5),
       forecast: monthForecast(transactions),
     }
@@ -39,24 +39,46 @@ export default function Home({ onEdit, onAdd, onTab }) {
         )}
       </header>
 
-      <section className="px-1 pb-6">
-        <div className="text-sm text-muted">Баланс месяца</div>
-        <div className="num mt-1 text-5xl font-semibold" style={{ color: sum.balance < 0 ? 'var(--color-expense)' : undefined }}>
-          {money(sum.balance, currency, { round: Math.abs(sum.balance) >= 100000 })}
-        </div>
-        <div className="mt-4 flex gap-6 text-sm">
-          <div>
-            <div className="text-muted">Доход</div>
-            <div className="num mt-0.5 text-lg font-medium text-income">{money(sum.income, currency)}</div>
-          </div>
-          <div>
-            <div className="text-muted">Расход</div>
-            <div className="num mt-0.5 text-lg font-medium">{money(sum.outflow, currency)}</div>
-          </div>
+      <section className="px-1 pb-5">
+        <div className="text-sm text-muted">Общий баланс</div>
+        <div className="num mt-1 text-5xl font-semibold" style={{ color: balances.total < 0 ? 'var(--color-expense)' : undefined }}>
+          {money(balances.total, currency, { round: Math.abs(balances.total) >= 100000 })}
         </div>
       </section>
 
       <div className="grid grid-cols-2 gap-3">
+        <Card>
+          <div className="text-sm text-muted">Активный</div>
+          <div className="num mt-1 text-2xl font-semibold" style={{ color: balances.active < 0 ? 'var(--color-expense)' : undefined }}>
+            {money(balances.active, currency, { round: Math.abs(balances.active) >= 100000 })}
+          </div>
+        </Card>
+        <Card role="button" onClick={() => onTab('goals')} className="active:bg-surface-2">
+          <div className="flex items-center justify-between text-sm text-muted">
+            В копилках <ChevronRight size={16} className="text-faint" />
+          </div>
+          <div className="num mt-1 text-2xl font-semibold">{money(balances.saved, currency, { round: Math.abs(balances.saved) >= 100000 })}</div>
+        </Card>
+      </div>
+
+      <Card className="mt-3 py-3">
+        <div className="flex items-baseline justify-between">
+          <div className="text-sm text-muted">Баланс месяца</div>
+          <div className="num text-lg font-semibold" style={{ color: sum.balance < 0 ? 'var(--color-expense)' : undefined }}>
+            {money(sum.balance, currency, { sign: true, round: Math.abs(sum.balance) >= 100000 })}
+          </div>
+        </div>
+        <div className="mt-1 flex gap-4 text-sm">
+          <span className="text-muted">
+            Доход <span className="num font-medium text-income">{money(sum.income, currency)}</span>
+          </span>
+          <span className="text-muted">
+            Расход <span className="num font-medium text-ink">{money(sum.outflow, currency)}</span>
+          </span>
+        </div>
+      </Card>
+
+      <div className="mt-3 grid grid-cols-2 gap-3">
         <Card>
           <div className="text-sm text-muted">Сегодня</div>
           <div className="num mt-1 text-2xl font-semibold">{money(todaySpent, currency)}</div>

@@ -13,7 +13,7 @@ export function Segmented({ options, value, onChange, size = 'md', className }) 
           onClick={() => onChange(o.id)}
           className={cn(
             'flex-1 rounded-xl font-medium transition-colors',
-            size === 'sm' ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm',
+            size === 'xs' ? 'px-1 py-1.5 text-xs' : size === 'sm' ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm',
             value === o.id ? 'bg-surface-2 text-ink shadow-sm' : 'text-muted',
           )}
           style={value === o.id && o.color ? { color: o.color } : undefined}

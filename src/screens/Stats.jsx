@@ -5,7 +5,7 @@ import TxnList, { TxnRow } from '../components/TxnList'
 import { Card, Empty, Segmented, SectionTitle, Sheet, cn } from '../components/ui'
 import { addDays, getPrevRange, getRange, PERIODS, shortDate, toISO, todayISO } from '../lib/dates'
 import { compact, money, percent } from '../lib/format'
-import { byCategory, change, inRange, monthForecast, sortTxns, summarize, timeSeries } from '../lib/stats'
+import { byCategory, change, inRange, monthForecast, realTxns, sortTxns, summarize, timeSeries } from '../lib/stats'
 import { useStore } from '../lib/store'
 
 // Highlighted spending groups; a tile appears only if the period has spending in it.
@@ -28,12 +28,14 @@ export default function Stats({ onEdit }) {
   const prev = getPrevRange(kind, offset, custom)
 
   const s = useMemo(() => {
-    const cur = transactions.filter((t) => inRange(t, range))
+    const all = transactions.filter((t) => inRange(t, range))
+    // Everything below is income / outflow only; transfers to jars are counted separately in sum.saved.
+    const cur = realTxns(all)
     const before = transactions.filter((t) => inRange(t, prev))
     const outflowTxns = cur.filter((t) => t.type !== 'income')
     return {
       cur,
-      sum: summarize(cur, range),
+      sum: summarize(all, range),
       prevSum: summarize(before, prev),
       cats: byCategory(pieType === 'income' ? cur.filter((t) => t.type === 'income') : outflowTxns, categoryMap),
       series: timeSeries(cur, range),
@@ -75,7 +77,7 @@ export default function Stats({ onEdit }) {
         </div>
       )}
 
-      {sum.count === 0 ? (
+      {sum.count === 0 && sum.transferCount === 0 ? (
         <Empty icon="📊" title="За этот период операций нет" text="Выберите другой период или добавьте операции" />
       ) : (
         <>
@@ -100,6 +102,18 @@ export default function Stats({ onEdit }) {
                 <div className="mt-0.5 text-xs text-faint">по текущему темпу · осталось {forecast.daysLeft} дн.</div>
               </div>
               <div className="num text-xl font-semibold">{money(forecast.forecast, currency, { round: true })}</div>
+            </Card>
+          )}
+
+          {sum.transferCount > 0 && (
+            <Card className="mt-3 flex items-center justify-between">
+              <div>
+                <div className="text-sm text-muted">Отложено в копилки</div>
+                <div className="num mt-0.5 text-xs text-faint">
+                  положено {money(sum.savedIn, currency, { round: true })} · снято {money(sum.savedOut, currency, { round: true })}
+                </div>
+              </div>
+              <div className="num text-xl font-semibold">{money(sum.saved, currency, { sign: true, round: Math.abs(sum.saved) >= 100000 })}</div>
             </Card>
           )}
 

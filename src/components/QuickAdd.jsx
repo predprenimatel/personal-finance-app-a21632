@@ -1,16 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarDays, Delete, LayoutGrid, PencilLine, Trash2, X } from 'lucide-react'
-import { rankCategories, TYPES } from '../lib/categories'
+import { CalendarDays, Delete, LayoutGrid, PencilLine, Plus, Trash2, X } from 'lucide-react'
+import { rankCategories, transferTitle, TYPES } from '../lib/categories'
 import { dayLabel, todayISO } from '../lib/dates'
 import { currencySymbol, money } from '../lib/format'
 import { useStore } from '../lib/store'
 import CategoryPicker from './CategoryPicker'
+import JarForm from './JarForm'
 import { Chip, Segmented } from './ui'
 
 const TYPE_OPTIONS = [
   { id: 'expense', label: 'Расход', color: 'var(--color-expense)' },
   { id: 'income', label: 'Доход', color: 'var(--color-income)' },
-  { id: 'debt', label: 'Платёж по долгу', color: 'var(--color-debt)' },
+  { id: 'debt', label: 'Долг', color: 'var(--color-debt)' },
+  { id: 'transfer', label: 'Копилка' },
+]
+const DIRECTIONS = [
+  { id: 'in', label: 'Положить' },
+  { id: 'out', label: 'Снять' },
 ]
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'back']
 
@@ -31,10 +37,13 @@ function displayAmount(value) {
   return dec !== undefined ? `${grouped},${dec}` : grouped
 }
 
-/** Fast entry form: amount → category → save. Also used for editing (`initial`). */
-export default function QuickAdd({ initial, onClose }) {
-  const { categories, categoryMap, transactions, currency, addTxn, updateTxn, deleteTxn, restoreTxn, showToast } = useStore()
-  const [type, setType] = useState(initial?.type ?? 'expense')
+/**
+ * Fast entry form: amount → category → save. Also used for editing (`initial`).
+ * `preset` pre-fills a new entry, e.g. { type: 'transfer', direction: 'out', jarId } from the Goals tab.
+ */
+export default function QuickAdd({ initial, preset, onClose }) {
+  const { categories, categoryMap, transactions, currency, addTxn, updateTxn, deleteTxn, restoreTxn, showToast, activeJars, jarMap, balances } = useStore()
+  const [type, setType] = useState(initial?.type ?? preset?.type ?? 'expense')
   const [amount, setAmount] = useState(initial ? String(initial.amount) : '')
   const [categoryId, setCategoryId] = useState(initial?.categoryId ?? null)
   const [date, setDate] = useState(initial?.date ?? todayISO())
@@ -42,6 +51,15 @@ export default function QuickAdd({ initial, onClose }) {
   const [noteOpen, setNoteOpen] = useState(Boolean(initial?.note))
   const [pickerOpen, setPickerOpen] = useState(false)
   const [extraChip, setExtraChip] = useState(null)
+  const [direction, setDirection] = useState(initial?.direction ?? preset?.direction ?? 'in')
+  // Default jar: the one used last, else the first one.
+  const [jarId, setJarId] = useState(() => {
+    if (initial?.jarId || preset?.jarId) return initial?.jarId ?? preset.jarId
+    const last = transactions.reduce((a, t) => (t.type === 'transfer' && jarMap.get(t.jarId) && !jarMap.get(t.jarId).archived && (!a || t.createdAt > a.createdAt) ? t : a), null)
+    return last?.jarId ?? activeJars[0]?.id ?? null
+  })
+  const [jarFormOpen, setJarFormOpen] = useState(false)
+  const isTransfer = type === 'transfer'
 
   const ranked = useMemo(() => rankCategories(transactions, categories, type), [transactions, categories, type])
   const firstTime = ranked.length === 0
@@ -54,12 +72,26 @@ export default function QuickAdd({ initial, onClose }) {
   }, [firstTime, categories, ranked, extraChip, categoryId, categoryMap, type])
 
   const value = Number(amount) || 0
-  const canSave = value > 0 && categoryId && categoryMap.get(categoryId)?.type === type
+
+  // Jar balance without the transfer being edited, so limits are checked against what the jar would hold.
+  const own = initial?.type === 'transfer' ? initial : null
+  const jarBase = (id) => (balances.jarBalance.get(id) || 0) - (own?.jarId === id ? (own.direction === 'in' ? own.amount : -own.amount) : 0)
+  const jar = jarMap.get(jarId)
+  const jarChips = jar && jar.archived ? [jar, ...activeJars] : activeJars
+  let jarError = null
+  if (isTransfer && jar && value > 0) {
+    const base = jarBase(jarId)
+    if (base + (direction === 'in' ? value : -value) < 0) jarError = direction === 'out' ? `В копилке только ${money(Math.max(0, base), currency)}` : 'Из копилки уже снято больше этой суммы'
+  }
+  // Changing an existing deposit into something else must not leave its old jar below zero.
+  if (!jarError && own && (!isTransfer || own.jarId !== jarId) && jarBase(own.jarId) < 0) jarError = `Эти деньги уже сняты из копилки «${jarMap.get(own.jarId)?.name ?? ''}»`
+
+  const canSave = isTransfer ? value > 0 && Boolean(jar) && !jarError : value > 0 && categoryId && categoryMap.get(categoryId)?.type === type
 
   // Physical keyboard support on desktop.
   useEffect(() => {
     const onKey = (e) => {
-      if (pickerOpen || ['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return
+      if (pickerOpen || jarFormOpen || ['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return
       if (/^[0-9]$/.test(e.key)) setAmount((v) => pressKey(v, e.key))
       else if (e.key === '.' || e.key === ',') setAmount((v) => pressKey(v, '.'))
       else if (e.key === 'Backspace') setAmount((v) => pressKey(v, 'back'))
@@ -71,16 +103,18 @@ export default function QuickAdd({ initial, onClose }) {
 
   function changeType(t) {
     setType(t)
-    if (categoryMap.get(categoryId)?.type !== t) setCategoryId(null)
+    if (t !== 'transfer' && categoryMap.get(categoryId)?.type !== t) setCategoryId(null)
   }
 
   function save() {
     if (!canSave) return
-    const fields = { type, amount: Math.round(value * 100) / 100, categoryId, date, note: note.trim() }
-    const cat = categoryMap.get(categoryId)
-    const label = `${cat.name} ${money(TYPES[type].sign * fields.amount, currency, { sign: true })}`
+    const common = { amount: Math.round(value * 100) / 100, date, note: note.trim() }
+    const fields = isTransfer ? { type, direction, jarId, ...common } : { type, categoryId, ...common }
+    const label = isTransfer
+      ? `${transferTitle(fields, jar)} ${money(fields.amount, currency)}`
+      : `${categoryMap.get(categoryId).name} ${money(TYPES[type].sign * fields.amount, currency, { sign: true })}`
     if (initial) {
-      updateTxn({ ...initial, ...fields })
+      updateTxn({ id: initial.id, createdAt: initial.createdAt, ...fields })
       showToast(`Изменено: ${label}`)
     } else {
       const txn = addTxn(fields)
@@ -95,7 +129,7 @@ export default function QuickAdd({ initial, onClose }) {
     onClose()
   }
 
-  const typeColor = TYPE_OPTIONS.find((o) => o.id === type).color
+  const typeColor = jarError ? 'var(--color-expense)' : TYPE_OPTIONS.find((o) => o.id === type).color ?? 'var(--color-ink)'
 
   return (
     <div className="fixed inset-0 z-40 flex justify-center">
@@ -105,7 +139,7 @@ export default function QuickAdd({ initial, onClose }) {
           <button onClick={onClose} className="grid h-10 w-10 place-items-center rounded-full text-muted active:bg-surface" aria-label="Закрыть">
             <X size={22} />
           </button>
-          <Segmented options={TYPE_OPTIONS} value={type} onChange={changeType} size="sm" className="flex-1" />
+          <Segmented options={TYPE_OPTIONS} value={type} onChange={changeType} size="xs" className="flex-1" />
           {initial ? (
             <button onClick={remove} className="grid h-10 w-10 place-items-center rounded-full text-expense active:bg-surface" aria-label="Удалить">
               <Trash2 size={20} />
@@ -132,25 +166,45 @@ export default function QuickAdd({ initial, onClose }) {
               </button>
             )}
           </div>
+          {jarError && <div className="anim-pop mt-3 text-sm text-expense">{jarError}</div>}
           {noteOpen && (
             <input autoFocus={!initial} value={note} onChange={(e) => setNote(e.target.value)} maxLength={120} placeholder="Заметка" onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} className="mt-3 w-full max-w-xs rounded-2xl bg-surface px-4 py-2.5 text-center text-sm outline-none placeholder:text-faint" />
           )}
         </div>
 
-        <div className="mb-3">
-          {firstTime && <div className="mb-2 px-1 text-xs text-faint">Выберите категорию — дальше здесь будут только ваши</div>}
-          <div className="no-scrollbar -mx-4 grid auto-cols-max grid-flow-col grid-rows-2 gap-2 overflow-x-auto px-4">
-            {chips.map((c) => (
-              <Chip key={c.id} active={c.id === categoryId} color={c.color} onClick={() => setCategoryId(c.id)}>
-                <span>{c.icon}</span>
-                {c.name}
+        {isTransfer ? (
+          <div className="mb-3">
+            <Segmented options={DIRECTIONS} value={direction} onChange={setDirection} size="sm" className="mb-2" />
+            {jarChips.length === 0 && <div className="mb-2 px-1 text-xs text-faint">Создайте копилку — деньги в ней не считаются расходом</div>}
+            <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4">
+              {jarChips.map((j) => (
+                <Chip key={j.id} active={j.id === jarId} color={j.color} onClick={() => setJarId(j.id)}>
+                  <span>{j.icon}</span>
+                  {j.name}
+                  <span className="num opacity-70">{money(balances.jarBalance.get(j.id) || 0, currency, { round: true })}</span>
+                </Chip>
+              ))}
+              <Chip onClick={() => setJarFormOpen(true)} className="text-muted">
+                <Plus size={15} /> Новая
               </Chip>
-            ))}
-            <Chip onClick={() => setPickerOpen(true)} className="text-muted">
-              <LayoutGrid size={15} /> Все
-            </Chip>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="mb-3">
+            {firstTime && <div className="mb-2 px-1 text-xs text-faint">Выберите категорию — дальше здесь будут только ваши</div>}
+            <div className="no-scrollbar -mx-4 grid auto-cols-max grid-flow-col grid-rows-2 gap-2 overflow-x-auto px-4">
+              {chips.map((c) => (
+                <Chip key={c.id} active={c.id === categoryId} color={c.color} onClick={() => setCategoryId(c.id)}>
+                  <span>{c.icon}</span>
+                  {c.name}
+                </Chip>
+              ))}
+              <Chip onClick={() => setPickerOpen(true)} className="text-muted">
+                <LayoutGrid size={15} /> Все
+              </Chip>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-3 gap-2">
           {KEYS.map((k) => (
@@ -169,6 +223,15 @@ export default function QuickAdd({ initial, onClose }) {
         </button>
       </div>
 
+      {jarFormOpen && (
+        <JarForm
+          onClose={() => setJarFormOpen(false)}
+          onSaved={(j) => {
+            setJarId(j.id)
+            setJarFormOpen(false)
+          }}
+        />
+      )}
       {pickerOpen && (
         <CategoryPicker
           type={type}
