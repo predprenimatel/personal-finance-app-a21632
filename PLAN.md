@@ -12,6 +12,13 @@ Personal, single-user finance tracker. All data stays in the browser; no server,
 - Currency switch, JSON/CSV export, JSON import, "Reset all" with confirmation.
 - PWA manifest + service worker (installable, offline).
 
+## ✅ Milestone 1.5 — Jars & total balance (done)
+- Data v2 (migrated in `normalize()`): `jars`, `transfer` operations (put / take out of a jar), `settings.startBalance`.
+- One balance formula (`balances()`): active balance, money in jars, total balance. Transfers are excluded from all income/outflow statistics; Stats shows «Отложено в копилки» for the period.
+- Quick entry: 4th segment «Копилка» (put / take out, jar chips with balances, create a jar inline, can't take out more than the balance).
+- «Цели» tab: list of jars with balance, history, put / take out, create / edit, delete = archive (remainder returned to the active balance), archive with restore.
+- Home: total balance, «Активный» and «В копилках» cards, smaller «Баланс месяца». Settings: «Стартовый остаток». CSV export includes transfers.
+
 ## Milestone 2 — Recurring templates & reminders
 - Template model (name, amount, category, type, schedule: monthly day / weekly / custom).
 - One-tap "add from template" row in the quick-entry sheet.
@@ -23,6 +30,7 @@ Personal, single-user finance tracker. All data stays in the browser; no server,
 - Progress bar, projected payoff date at current pace, total debt load, share of debt payments in monthly income.
 
 ## Milestone 4 — Goals
+- Target amount and date for jars (progress bar, «сколько откладывать в месяц»), shown on the «Цели» tab next to the jars.
 - Weekly / monthly / yearly goals: spending limit (total or per category), savings, income, debt payoff.
 - Progress bars, "on track / off track" forecast, in-app alerts at 80% and 100% of a limit; goals block on Home.
 

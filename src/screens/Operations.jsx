@@ -5,7 +5,7 @@ import TxnList from '../components/TxnList'
 import { Chip, Empty, Segmented, cn } from '../components/ui'
 import { TYPES } from '../lib/categories'
 import { money } from '../lib/format'
-import { applyFilters, sortTxns } from '../lib/stats'
+import { applyFilters, realTxns, sortTxns } from '../lib/stats'
 import { useStore } from '../lib/store'
 
 const TYPE_FILTERS = [
@@ -13,10 +13,11 @@ const TYPE_FILTERS = [
   { id: 'expense', label: 'Расходы' },
   { id: 'income', label: 'Доходы' },
   { id: 'debt', label: 'Долги' },
+  { id: 'transfer', label: 'Копилка' },
 ]
 
 export default function Operations({ onEdit }) {
-  const { transactions, categoryMap, currency } = useStore()
+  const { transactions, categoryMap, jarMap, currency } = useStore()
   const [filters, setFilters] = useState({ type: 'all', categoryId: null, query: '', min: '', max: '' })
   const [showAmount, setShowAmount] = useState(false)
   const set = (patch) => setFilters((f) => ({ ...f, ...patch }))
@@ -24,12 +25,13 @@ export default function Operations({ onEdit }) {
   // Only categories that actually have transactions are offered as filters.
   const usedCats = useMemo(() => {
     const counts = new Map()
-    for (const t of transactions) if (filters.type === 'all' || t.type === filters.type) counts.set(t.categoryId, (counts.get(t.categoryId) || 0) + 1)
+    for (const t of realTxns(transactions)) if (filters.type === 'all' || t.type === filters.type) counts.set(t.categoryId, (counts.get(t.categoryId) || 0) + 1)
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => categoryMap.get(id)).filter(Boolean)
   }, [transactions, categoryMap, filters.type])
 
-  const filtered = useMemo(() => sortTxns(applyFilters(transactions, filters, categoryMap)), [transactions, filters, categoryMap])
-  const total = filtered.reduce((s, t) => s + TYPES[t.type].sign * t.amount, 0)
+  const filtered = useMemo(() => sortTxns(applyFilters(transactions, filters, categoryMap, jarMap)), [transactions, filters, categoryMap, jarMap])
+  // Transfers only: net put into jars. Otherwise: income − outflow, transfers don't count.
+  const total = filters.type === 'transfer' ? filtered.reduce((s, t) => s + (t.direction === 'in' ? t.amount : -t.amount), 0) : realTxns(filtered).reduce((s, t) => s + TYPES[t.type].sign * t.amount, 0)
   const active = filters.categoryId || filters.query || filters.min || filters.max || filters.type !== 'all'
 
   return (
@@ -69,7 +71,7 @@ export default function Operations({ onEdit }) {
 
       {active && filtered.length > 0 && (
         <div className="mt-4 flex items-baseline justify-between px-2 text-sm">
-          <span className="text-muted">{filtered.length} операций</span>
+          <span className="text-muted">{filtered.length} операций{filters.type === 'transfer' ? ' · отложено' : ''}</span>
           <span className="num font-medium">{money(total, currency, { sign: true })}</span>
         </div>
       )}
@@ -103,7 +105,7 @@ function CategoryFilter({ cats, value, onChange, type }) {
           {c.name}
         </Chip>
       ))}
-      {type !== 'all' && (
+      {type !== 'all' && type !== 'transfer' && (
         <Chip onClick={() => setPickerOpen(true)} className="text-muted">
           <Search size={14} /> Найти
         </Chip>

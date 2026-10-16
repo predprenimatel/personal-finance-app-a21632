@@ -1,5 +1,5 @@
 // Offline support: app shell is network-first, static assets cache-first.
-const CACHE = 'kopilka-v1'
+const CACHE = 'kopilka-v2'
 const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/icon-192.png']
 
 self.addEventListener('install', (e) => {
