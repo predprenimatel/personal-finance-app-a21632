@@ -33,6 +33,33 @@ export const shortDate = (iso) => {
   return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`
 }
 
+export function addMonths(iso, n) {
+  const d = parseISO(iso)
+  const day = d.getDate()
+  const x = new Date(d.getFullYear(), d.getMonth() + n, 1)
+  const dim = new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate()
+  x.setDate(Math.min(day, dim))
+  return toISO(x)
+}
+
+/** Whole months until a deadline. 0 if the date is in the past, null if there is no date, at least 1 while it is still ahead. */
+export function monthsLeft(iso) {
+  if (!iso) return null
+  const today = parseISO(todayISO())
+  const d = parseISO(iso)
+  if (d < today) return 0
+  let m = (d.getFullYear() - today.getFullYear()) * 12 + (d.getMonth() - today.getMonth())
+  if (d.getDate() < today.getDate()) m -= 1
+  return Math.max(m, 1)
+}
+
+export function mediumDate(iso) {
+  if (!iso) return ''
+  const d = parseISO(iso)
+  const year = d.getFullYear() !== new Date().getFullYear() ? ` ${d.getFullYear()}` : ''
+  return `${d.getDate()} ${MONTHS_GEN[d.getMonth()]}${year}`
+}
+
 export const PERIODS = [
   { id: 'day', label: 'День' },
   { id: 'week', label: 'Неделя' },

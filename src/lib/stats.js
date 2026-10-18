@@ -1,15 +1,48 @@
-import { addDays, daysBetween, MONTHS_SHORT, parseISO, toISO, todayISO } from './dates'
+import { addDays, addMonths, daysBetween, MONTHS_SHORT, monthsLeft, parseISO, toISO, todayISO } from './dates'
 
 export const inRange = (t, { from, to }) => t.date >= from && t.date <= to
 
-/** Totals for a set of transactions already filtered to a period. */
-export function summarize(txns, range) {
-  let income = 0, expense = 0, debt = 0
-  for (const t of txns) {
+export const isTransfer = (t) => t.type === 'transfer'
+/**
+ * Income / expense / debt only. Transfers to and from jars are neither income nor spending,
+ * so every income/outflow aggregation goes through this at its entry.
+ */
+export const realTxns = (txns) => txns.filter((t) => !isTransfer(t))
+
+const cents = (v) => Math.round(v * 100) / 100
+
+/**
+ * The single source of truth for balances.
+ * active = startBalance + income − expense − debt − Σ(transfer in) + Σ(transfer out)
+ * jar    = openingBalance + Σ(in) − Σ(out);  saved = Σ jar over non-archived jars;  total = active + saved
+ */
+export function balances({ transactions, jars, settings }) {
+  const jarBalance = new Map(jars.map((j) => [j.id, j.openingBalance]))
+  let active = settings.startBalance || 0
+  for (const t of transactions) {
+    if (isTransfer(t)) {
+      const d = t.direction === 'in' ? t.amount : -t.amount
+      active -= d
+      jarBalance.set(t.jarId, (jarBalance.get(t.jarId) || 0) + d)
+    } else if (t.type === 'income') active += t.amount
+    else active -= t.amount
+  }
+  for (const [id, v] of jarBalance) jarBalance.set(id, cents(v))
+  const saved = cents(jars.filter((j) => !j.archived).reduce((s, j) => s + (jarBalance.get(j.id) || 0), 0))
+  active = cents(active)
+  return { active, saved, total: cents(active + saved), jarBalance }
+}
+
+/** Totals for a set of transactions already filtered to a period. `saved` = put into jars − taken out (transfers). */
+export function summarize(all, range) {
+  let income = 0, expense = 0, debt = 0, savedIn = 0, savedOut = 0
+  for (const t of all) {
     if (t.type === 'income') income += t.amount
     else if (t.type === 'expense') expense += t.amount
     else if (t.type === 'debt') debt += t.amount
+    else if (isTransfer(t)) t.direction === 'in' ? (savedIn += t.amount) : (savedOut += t.amount)
   }
+  const txns = realTxns(all)
   const outflow = expense + debt
   const balance = income - outflow
   // Average per elapsed day: future days of the current period don't count.
@@ -22,12 +55,15 @@ export function summarize(txns, range) {
     avgPerDay: days > 0 ? outflow / days : 0,
     days,
     count: txns.length,
+    savedIn, savedOut,
+    saved: savedIn - savedOut,
+    transferCount: all.length - txns.length,
   }
 }
 
 export function byCategory(txns, categoryMap) {
   const map = new Map()
-  for (const t of txns) {
+  for (const t of realTxns(txns)) {
     const row = map.get(t.categoryId) || { id: t.categoryId, value: 0, count: 0 }
     row.value += t.amount
     row.count += 1
@@ -64,7 +100,7 @@ export function timeSeries(txns, range) {
     }
   }
 
-  for (const t of txns) {
+  for (const t of realTxns(txns)) {
     const b = buckets.get(byMonth ? t.date.slice(0, 7) : t.date)
     if (!b) continue
     if (t.type === 'income') b.income += t.amount
@@ -82,13 +118,13 @@ export function monthForecast(transactions) {
   const from = toISO(new Date(now.getFullYear(), now.getMonth(), 1))
   const to = toISO(new Date(now.getFullYear(), now.getMonth() + 1, 0))
   const today = todayISO()
-  const spent = transactions.filter((t) => t.type !== 'income' && t.date >= from && t.date <= today).reduce((s, t) => s + t.amount, 0)
+  const spent = realTxns(transactions).filter((t) => t.type !== 'income' && t.date >= from && t.date <= today).reduce((s, t) => s + t.amount, 0)
   const elapsed = now.getDate()
   const total = daysBetween(from, to)
   return { spent, forecast: (spent / elapsed) * total, daysLeft: total - elapsed }
 }
 
-export function applyFilters(txns, { type = 'all', categoryId = null, query = '', min = '', max = '' }, categoryMap) {
+export function applyFilters(txns, { type = 'all', categoryId = null, query = '', min = '', max = '' }, categoryMap, jarMap = new Map(), debtMap = new Map()) {
   const q = query.trim().toLowerCase()
   const lo = min === '' ? null : Number(min)
   const hi = max === '' ? null : Number(max)
@@ -98,11 +134,78 @@ export function applyFilters(txns, { type = 'all', categoryId = null, query = ''
     if (lo !== null && t.amount < lo) return false
     if (hi !== null && t.amount > hi) return false
     if (q) {
-      const name = categoryMap.get(t.categoryId)?.name?.toLowerCase() ?? ''
-      if (!t.note.toLowerCase().includes(q) && !name.includes(q) && !String(t.amount).includes(q)) return false
+      const name = (isTransfer(t) ? jarMap.get(t.jarId)?.name : categoryMap.get(t.categoryId)?.name)?.toLowerCase() ?? ''
+      const debtName = t.debtId ? (debtMap.get(t.debtId)?.name?.toLowerCase() ?? '') : ''
+      if (!t.note.toLowerCase().includes(q) && !name.includes(q) && !debtName.includes(q) && !String(t.amount).includes(q)) return false
     }
     return true
   })
 }
 
 export const sortTxns = (txns) => [...txns].sort((a, b) => (a.date === b.date ? b.createdAt - a.createdAt : a.date < b.date ? 1 : -1))
+
+/** Remaining balance of a debt: opening remaining minus linked payments. Not stored. */
+export function debtRemaining(debt, transactions) {
+  let paid = 0
+  for (const t of transactions) if (t.type === 'debt' && t.debtId === debt.id) paid += t.amount
+  return cents((debt.openingRemaining || 0) - paid)
+}
+
+/** openingRemaining that makes the computed remainder equal `remaining` given current payments. */
+export function openingForRemaining(debt, transactions, remaining) {
+  let paid = 0
+  for (const t of transactions) if (t.type === 'debt' && t.debtId === debt.id) paid += t.amount
+  return cents(Math.max(0, remaining) + paid)
+}
+
+/**
+ * Payoff forecast from the average payment over the last 3 months.
+ * Null when there are fewer than 2 payments in the window — we don't invent a pace.
+ */
+export function debtOutlook(payments, remaining) {
+  if (!(remaining > 0)) return null
+  const today = todayISO()
+  const from = addMonths(today, -3)
+  const recent = payments.filter((p) => p.date >= from && p.date <= today)
+  if (recent.length < 2) return null
+  const sum = recent.reduce((s, p) => s + p.amount, 0)
+  const pace = sum / 3
+  if (pace <= 0) return null
+  const months = remaining / pace
+  return { pace: cents(pace), months, closeDate: addMonths(today, Math.max(1, Math.ceil(months))) }
+}
+
+export function goalSaved(goal, jarBalance) {
+  return cents(goal.jarId ? jarBalance.get(goal.jarId) || 0 : goal.manualSaved || 0)
+}
+
+/** Signed contributions used to judge the savings pace. Jar goals use transfers; manual goals use top-ups. */
+export function goalFlows(goal, transactions) {
+  if (goal.jarId) {
+    return transactions
+      .filter((t) => t.type === 'transfer' && t.jarId === goal.jarId)
+      .map((t) => ({ date: t.date, amount: t.direction === 'in' ? t.amount : -t.amount }))
+  }
+  return (goal.topups || []).map((t) => ({ date: t.date, amount: t.amount }))
+}
+
+/**
+ * Savings outlook. `status` is 'done' | 'late' | 'ok' | 'behind' | null.
+ * null means there isn't enough history to say whether the pace is enough.
+ */
+export function goalOutlook({ saved, target, deadline, flows }) {
+  const left = cents(Math.max(0, target - saved))
+  const pct = target > 0 ? saved / target : 0
+  const done = target > 0 && saved >= target - 0.009
+  if (done) return { left: 0, pct, neededPerMonth: 0, avgPerMonth: null, status: 'done', months: null }
+  const ml = deadline ? monthsLeft(deadline) : null
+  const neededPerMonth = ml > 0 ? cents(left / ml) : null
+  const today = todayISO()
+  const from = addMonths(today, -3)
+  const recent = (flows || []).filter((f) => f.date >= from && f.date <= today)
+  const avgPerMonth = recent.length ? cents(recent.reduce((s, f) => s + f.amount, 0) / 3) : null
+  let status = null
+  if (ml === 0) status = 'late'
+  else if (neededPerMonth != null && recent.length >= 1) status = avgPerMonth + 0.5 >= neededPerMonth ? 'ok' : 'behind'
+  return { left, pct, neededPerMonth, avgPerMonth, status, months: ml }
+}

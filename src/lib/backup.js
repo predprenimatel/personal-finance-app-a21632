@@ -20,11 +20,18 @@ const csvCell = (v) => {
   return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
+// Transfers: type_ru «Копилка», jar name in the category column. Debt payments keep their category and add the debt name.
 export function exportCSV(data, categoryMap) {
-  const header = ['date', 'type', 'type_ru', 'amount', 'currency', 'category_id', 'category', 'note']
+  const jarMap = new Map((data.jars || []).map((j) => [j.id, j]))
+  const debtMap = new Map((data.debts || []).map((d) => [d.id, d]))
+  const header = ['date', 'type', 'type_ru', 'amount', 'currency', 'category_id', 'category', 'note', 'direction', 'debt']
   const rows = [...data.transactions]
     .sort((a, b) => (a.date < b.date ? -1 : 1))
-    .map((t) => [t.date, t.type, TYPES[t.type]?.label, t.amount, data.settings.currency, t.categoryId, categoryMap.get(t.categoryId)?.name, t.note])
+    .map((t) =>
+      t.type === 'transfer'
+        ? [t.date, t.type, TYPES.transfer.label, t.amount, data.settings.currency, t.jarId, jarMap.get(t.jarId)?.name, t.note, t.direction, '']
+        : [t.date, t.type, TYPES[t.type]?.label, t.amount, data.settings.currency, t.categoryId, categoryMap.get(t.categoryId)?.name, t.note, '', t.debtId ? debtMap.get(t.debtId)?.name ?? '' : ''],
+    )
   // BOM so Excel opens Cyrillic correctly.
   const csv = '﻿' + [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\n')
   download(`kopilka-${todayISO()}.csv`, csv, 'text/csv;charset=utf-8')

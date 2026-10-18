@@ -3,7 +3,12 @@ export const TYPES = {
   expense: { label: 'Расход', plural: 'Расходы', color: 'var(--color-expense)', sign: -1 },
   income: { label: 'Доход', plural: 'Доходы', color: 'var(--color-income)', sign: 1 },
   debt: { label: 'Долг', plural: 'Долги', color: 'var(--color-debt)', sign: -1 },
+  // Moves money between the active balance and a jar; neither income nor spending. Sign depends on `direction`.
+  transfer: { label: 'Копилка', plural: 'Копилки', color: 'var(--color-muted)', sign: -1 },
 }
+
+/** «В копилку: Отпуск» / «Из копилки: Отпуск». */
+export const transferTitle = (t, jar) => `${t.direction === 'in' ? 'В копилку' : 'Из копилки'}: ${jar?.name ?? 'Копилка'}`
 
 export const DEFAULT_CATEGORIES = [
   { id: 'salary', type: 'income', name: 'Зарплата', icon: '💼', color: '#5BD6A0' },
@@ -34,7 +39,19 @@ export const DEFAULT_CATEGORIES = [
   { id: 'obligations', type: 'debt', name: 'Обязательства', icon: '📌', color: '#FBB6CE' },
 ]
 
+export const DEBT_KINDS = [
+  { id: 'credit', label: 'Кредит', categoryId: 'credit', icon: '🏦' },
+  { id: 'microloan', label: 'Микрозайм', categoryId: 'microloan', icon: '⚡' },
+  { id: 'installment', label: 'Рассрочка', categoryId: 'installment', icon: '🧩' },
+  { id: 'personal', label: 'Личный', categoryId: 'personal_debt', icon: '🤝' },
+  { id: 'obligation', label: 'Обязательство', categoryId: 'obligations', icon: '📌' },
+]
+
+export const kindMeta = (kind) => DEBT_KINDS.find((k) => k.id === kind) ?? DEBT_KINDS[0]
+
+export const GOAL_ICONS = ['🎯', '🚗', '🏖️', '✈️', '🏠', '💻', '📱', '💍', '🎓', '🛡️', '🎁', '👶', '🩺', '🎮', '🐷', '💰']
 export const ICON_CHOICES = ['🍔', '🍕', '🥦', '🍺', '🚕', '⛽', '🚗', '✈️', '🏋️', '🐶', '👶', '🎁', '📚', '🎓', '💇', '🧴', '🛠️', '🎨', '📷', '🎵', '🏥', '🧹', '💰', '📈', '🪙', '💳', '🏷️', '⭐']
+export const JAR_ICONS = ['🐷', '🏖️', '✈️', '🚗', '🏠', '🛡️', '🎁', '💻', '📱', '🎓', '💍', '👶', '🐶', '🩺', '🎮', '💰']
 export const COLOR_CHOICES = ['#FF7A6B', '#FF9F6B', '#FFC857', '#C6F36B', '#5BD6A0', '#4FD1C5', '#66D9E8', '#6BB8FF', '#8C9EFF', '#B48CFF', '#E879F9', '#F78FB3']
 
 /**
@@ -59,5 +76,5 @@ export function rankCategories(transactions, categories, type) {
 
 /** IDs of categories that have at least one transaction. */
 export function usedCategoryIds(transactions) {
-  return new Set(transactions.map((t) => t.categoryId))
+  return new Set(transactions.filter((t) => t.categoryId).map((t) => t.categoryId))
 }

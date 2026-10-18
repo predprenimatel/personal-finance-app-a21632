@@ -13,7 +13,7 @@ export function Segmented({ options, value, onChange, size = 'md', className }) 
           onClick={() => onChange(o.id)}
           className={cn(
             'flex-1 rounded-xl font-medium transition-colors',
-            size === 'sm' ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm',
+            size === 'xs' ? 'px-1 py-1.5 text-xs' : size === 'sm' ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm',
             value === o.id ? 'bg-surface-2 text-ink shadow-sm' : 'text-muted',
           )}
           style={value === o.id && o.color ? { color: o.color } : undefined}
@@ -113,6 +113,23 @@ export function SectionTitle({ children, right }) {
     <div className="mb-2 mt-6 flex items-center justify-between px-1">
       <h3 className="text-sm font-medium text-muted">{children}</h3>
       {right}
+    </div>
+  )
+}
+
+/** 0–1. Shifts from coral toward the accent, then green as the bar fills. */
+export function progressColor(p) {
+  if (p >= 1) return 'var(--color-income)'
+  if (p >= 0.66) return 'var(--color-accent)'
+  if (p >= 0.35) return 'var(--color-debt)'
+  return 'var(--color-expense)'
+}
+
+export function ProgressBar({ value, color }) {
+  const p = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
+  return (
+    <div className="h-2 overflow-hidden rounded-full bg-black/30">
+      <div className="h-full rounded-full transition-all duration-500 ease-out" style={{ width: `${p * 100}%`, background: color ?? progressColor(p) }} />
     </div>
   )
 }

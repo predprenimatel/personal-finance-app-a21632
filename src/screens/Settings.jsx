@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { Download, FileJson, FileSpreadsheet, RotateCcw, Upload } from 'lucide-react'
 import { Card, SectionTitle, Sheet, cn } from '../components/ui'
 import { exportCSV, exportJSON } from '../lib/backup'
-import { CURRENCIES } from '../lib/format'
+import { CURRENCIES, currencySymbol } from '../lib/format'
 import { useStore } from '../lib/store'
 
 export default function Settings() {
@@ -40,6 +40,9 @@ export default function Settings() {
         ))}
       </div>
 
+      <SectionTitle>Стартовый остаток</SectionTitle>
+      <StartBalance />
+
       <SectionTitle>Резервная копия</SectionTitle>
       <Card className="divide-y divide-line p-0">
         <Row icon={<FileJson size={20} />} title="Экспорт в JSON" sub="Полная копия для восстановления" onClick={() => exportJSON(data)} />
@@ -59,7 +62,7 @@ export default function Settings() {
       {confirmReset && (
         <Confirm
           title="Удалить все данные?"
-          text="Все операции и свои категории будут удалены без возможности восстановления. Сначала сделайте экспорт, если нужна копия."
+          text="Все операции, копилки, долги, цели и свои категории будут удалены без возможности восстановления. Сначала сделайте экспорт, если нужна копия."
           action="Удалить всё"
           danger
           onCancel={() => setConfirmReset(false)}
@@ -89,6 +92,37 @@ export default function Settings() {
         />
       )}
     </div>
+  )
+}
+
+/** Money the user had before they started tracking; the base of the active balance. */
+function StartBalance() {
+  const { settings, currency, setSettings } = useStore()
+  const [text, setText] = useState(settings.startBalance ? String(settings.startBalance).replace('.', ',') : '')
+
+  function commit() {
+    const v = Number(text.replace(',', '.').replace(/\s/g, '').replace('−', '-'))
+    const value = text.trim() === '' || !Number.isFinite(v) ? 0 : Math.round(v * 100) / 100
+    if (value !== settings.startBalance) setSettings({ startBalance: value })
+    setText(value ? String(value).replace('.', ',') : '')
+  }
+
+  return (
+    <>
+      <label className="flex items-center gap-2 rounded-2xl bg-surface px-4 py-3">
+        <input
+          inputMode="decimal"
+          value={text}
+          onChange={(e) => setText(e.target.value.replace(/[^\d.,\s\-−]/g, ''))}
+          onBlur={commit}
+          onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+          placeholder="0"
+          className="num w-full bg-transparent text-lg outline-none placeholder:text-faint"
+        />
+        <span className="text-muted">{currencySymbol(currency)}</span>
+      </label>
+      <p className="mt-2 px-1 text-xs text-faint">Сколько денег было на руках и на картах до начала учёта. С него считается активный баланс.</p>
+    </>
   )
 }
 
